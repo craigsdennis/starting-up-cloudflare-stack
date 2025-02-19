@@ -11,8 +11,8 @@ type Link = {
 
 export class ProductGathererWorkflow extends WorkflowEntrypoint<Env, Params> {
 	async run(event: WorkflowEvent<Params>, step: WorkflowStep) {
-		let { links, sessionId } = await step.do('Gather Product Links', async () => {
-			const browser = await puppeteer.launch(this.env.BROWSER);
+		const browser = await puppeteer.launch(this.env.BROWSER);
+		let links = await step.do('Gather Product Links', async () => {
 			const page = await browser.newPage();
 			await page.goto(`https://developers.cloudflare.com/products/?product-group=Developer+platform`);
 			const handles = await page.$$('a.block');
@@ -32,10 +32,8 @@ export class ProductGathererWorkflow extends WorkflowEntrypoint<Env, Params> {
 				});
 				links.push(link);
 			}
-			const sessionId = browser.sessionId();
 			await page.close();
-			await browser.disconnect();
-			return { links, sessionId };
+			return links;
 		});
 		console.log("links", JSON.stringify(links));
 		links = await step.do('Filter out already gathered products', async () => {
@@ -49,14 +47,6 @@ export class ProductGathererWorkflow extends WorkflowEntrypoint<Env, Params> {
 		});
 		for (const link of links) {
 			const { slogan, svgHTML } = await step.do(`Gather ${link.title}`, async () => {
-				let browser;
-				try {
-					browser = await puppeteer.connect(this.env.BROWSER, sessionId);
-				} catch (err) {
-					console.warn(`Could not connect to browser session ${sessionId}`);
-					browser = await puppeteer.launch(this.env.BROWSER);
-					sessionId = browser.sessionId();
-				}
 				const page = await browser.newPage();
 				await page.goto(link.href);
 				// First one in there
@@ -65,8 +55,6 @@ export class ProductGathererWorkflow extends WorkflowEntrypoint<Env, Params> {
 				const svgHandle = await page.$('.sidebar-pane svg');
 				const svgHTML = await svgHandle?.evaluate((el) => el.outerHTML);
 				await page.close();
-				await browser.disconnect();
-				browser = null;
 				return { slogan, svgHTML };
 			});
 			const inserted = await step.do(`Storing ${link.title} in database`, async () => {
